@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mental Math Quest</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<script>
+  // Apply the saved (or system) theme before first paint, so there's no flash.
+  document.documentElement.dataset.theme = localStorage.getItem("theme") ||
+    (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+</script>
+<style>
+  :root{--bg:#F3F4F6;--surface:#fff;--ink:#1B1F24;--muted:#6B7280;--line:#E5E7EB;--accent:#2F5BEA;--on-accent:#fff;--good:#1E8E5A;--bad:#C93C3C;color-scheme:light}
+  :root[data-theme=dark]{--bg:#0F1216;--surface:#171B21;--ink:#E8EAED;--muted:#9AA3AF;--line:#272D36;--accent:#6C8CFF;--on-accent:#0F1216;--good:#3DD68C;--bad:#FF7B7B;color-scheme:dark}
+  *{box-sizing:border-box} [hidden]{display:none!important}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;transition:background .2s,color .2s}
+  header{max-width:960px;margin:0 auto;padding:20px 20px 0;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  h1{font-size:22px;margin:0} h2{font-size:18px;margin:0 0 2px}
+  .right{display:flex;align-items:center;gap:8px}
+  main{max-width:960px;margin:20px auto;padding:0 20px 40px;display:grid;grid-template-columns:1.3fr 1fr;gap:20px}
+  @media(max-width:760px){main{grid-template-columns:1fr}}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:26px}
+  .muted{color:var(--muted)} small,.hint{font-size:12px;color:var(--muted)}
+  button{font:inherit;cursor:pointer;border-radius:10px;border:1px solid transparent;padding:9px 14px;color:var(--ink);background:none}
+  .primary{width:100%;background:var(--accent);color:var(--on-accent);font-weight:600;padding:13px;margin-top:8px}
+  .primary:hover{filter:brightness(.93)}
+  .ghost{border-color:var(--line)} .ghost:hover{background:var(--bg)}
+  .icon{border:1px solid var(--line);width:38px;height:38px;padding:0;font-size:17px}
+  .field{margin-top:18px} .cap{font-size:12px;color:var(--muted);margin-bottom:6px}
+  .seg{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .seg label{flex:1;text-align:center;cursor:pointer}
+  .seg input{display:none}
+  .seg span{display:block;padding:9px 8px}
+  .seg label:has(input:checked) span{background:var(--accent);color:var(--on-accent);font-weight:600}
+  select,input[type=text],input[type=password],#answer{width:100%;font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+  select:focus,input:focus{outline:2px solid var(--accent);outline-offset:-1px}
+  .bar{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+  .clock{text-align:right;display:flex;flex-direction:column}
+  #timer{font:700 20px ui-monospace,Consolas,monospace;color:var(--accent);font-variant-numeric:tabular-nums}
+  .prev{min-height:22px;margin-top:14px}
+  .qcard{margin:6px 0 14px;padding:34px 10px;text-align:center;border:1px solid var(--line);border-radius:12px;font-size:clamp(40px,9vw,58px);font-weight:700;font-variant-numeric:tabular-nums}
+  .fb{min-height:28px;text-align:center;font-weight:700;font-size:17px;margin-bottom:12px}
+  #answer{font-size:24px;text-align:center;padding:12px}
+  #form{text-align:center} #voice{text-align:center}
+  #vstatus{color:var(--accent)} .actions{display:flex;justify-content:center;gap:8px;margin-top:20px}
+  .tabs{display:flex;gap:6px;margin:14px 0 8px} .tabs button{padding:5px 12px;border:1px solid var(--line);font-size:13px}
+  .tabs button.on{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+  ol{list-style:none;margin:0;padding:0} li{display:flex;gap:12px;padding:9px 0;border-bottom:1px solid var(--line)}
+  li .rank{width:26px;color:var(--muted)} li .name{flex:1;overflow:hidden;text-overflow:ellipsis} li .score{font-weight:700}
+  li.you .name{color:var(--accent);font-weight:600}
+  dialog{border:1px solid var(--line);border-radius:14px;background:var(--surface);color:var(--ink);padding:26px;width:min(380px,92vw)}
+  dialog::backdrop{background:rgba(0,0,0,.45)}
+  .err{color:var(--bad);min-height:20px;font-size:13px}
+
+  /* ===== Quest theme: retro-RPG look with original creature partners ===== */
+  :root{--sky:#BFE3FF;--grass:#8FD18A;--edge:#1B1F24;--font-px:"Press Start 2P",ui-monospace,Consolas,monospace}
+  :root[data-theme=dark]{--sky:#16263B;--grass:#1D4630;--edge:#3B4658}
+  :root[data-partner=flame]{--accent:#D9480F} :root[data-partner=leaf]{--accent:#2B8A3E}
+  :root[data-partner=aqua]{--accent:#1971C2} :root[data-partner=spark]{--accent:#B07D00}
+  :root[data-theme=dark][data-partner=flame]{--accent:#FF8A4C} :root[data-theme=dark][data-partner=leaf]{--accent:#51CF66}
+  :root[data-theme=dark][data-partner=aqua]{--accent:#4DABF7} :root[data-theme=dark][data-partner=spark]{--accent:#FFD43B}
+  body{background:linear-gradient(180deg,var(--sky),var(--bg) 360px),var(--bg)}
+  h1{font:16px/1.3 var(--font-px)} h2{font:13px/1.5 var(--font-px)}
+  .card{border:3px solid var(--edge);box-shadow:5px 5px 0 var(--edge);border-radius:8px}
+  .primary{font:12px var(--font-px);border:3px solid var(--edge);box-shadow:0 4px 0 var(--edge);border-radius:8px}
+  .primary:active{transform:translateY(3px);box-shadow:0 1px 0 var(--edge)}
+  .seg{border:2px solid var(--edge);border-radius:8px}
+  .seg.partners span{font-size:30px;line-height:1.25;padding:10px 4px}
+  .seg.partners small{display:block;font:9px var(--font-px);margin-top:4px}
+  .seg label:has(input:checked) small{color:inherit}
+  .qcard{position:relative;border:3px solid var(--edge);border-radius:8px;font-family:var(--font-px);font-size:clamp(26px,6.5vw,38px);padding:44px 10px 30px}
+  .qcard::before{content:"A wild question appeared!";position:absolute;top:12px;left:0;right:0;font:9px var(--font-px);color:var(--muted)}
+  .stage{position:relative;height:176px;margin:12px 0 14px;border:3px solid var(--edge);border-radius:8px;overflow:hidden;background:linear-gradient(var(--sky) 0 60%,var(--grass) 60%)}
+  .hud{position:absolute;top:10px;left:10px;width:150px;padding:8px 10px;background:var(--surface);border:3px solid var(--edge);border-radius:6px;font:9px/1.5 var(--font-px)}
+  .hud span{float:right;color:var(--muted)}
+  .hp{height:8px;margin-top:6px;background:var(--line);border:2px solid var(--edge);border-radius:4px;overflow:hidden}
+  .hp i{display:block;height:100%;width:0;background:var(--accent);transition:width .35s}
+  .pad{position:absolute;left:8%;bottom:12px;width:120px;height:20px;border-radius:50%;background:rgba(0,0,0,.2)}
+  .mon{position:absolute;left:calc(8% + 14px);bottom:22px;line-height:1;transition:font-size .25s}
+  .foe{position:absolute;right:12%;top:46px;font-size:46px;animation:bob 2s ease-in-out infinite}
+  .mon.hit{animation:bounce .5s} .mon.miss{animation:shake .4s}
+  .mon img{display:block;max-width:240px;width:auto}
+  @keyframes bounce{40%{transform:translateY(-22px)}100%{transform:none}}
+  @keyframes shake{25%{transform:translateX(-8px)}75%{transform:translateX(8px)}}
+  @keyframes bob{50%{transform:translateY(-8px)}}
+  @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Mental Math Quest</h1>
+  <div class="right">
+    <span id="who" class="muted"></span>
+    <button id="authBtn" class="ghost"></button>
+    <button id="theme" class="icon" aria-label="Toggle light or dark theme"></button>
+  </div>
+</header>
+
+<main>
+  <section class="card">
+    <!-- SETUP -->
+    <div id="setup">
+      <h2>Choose your partner</h2>
+      <p class="muted" style="margin:6px 0 0">It grows stronger as your streak climbs.</p>
+      <div class="field"><div class="seg partners">
+        <label><input type="radio" name="partner" value="flame" checked><span>🥚<small>Emberlet</small></span></label>
+        <label><input type="radio" name="partner" value="leaf"><span>🌱<small>Sproutle</small></span></label>
+        <label><input type="radio" name="partner" value="aqua"><span>💧<small>Bubblin</small></span></label>
+        <label><input type="radio" name="partner" value="spark"><span>🥚<small>Voltling</small></span></label>
+      </div></div>
+      <div id="partnerStages"></div>
+      <div class="field"><div class="cap">Mode</div>
+        <div class="seg">
+          <label><input type="radio" name="mode" value="separate" checked><span>Separate operation</span></label>
+          <label><input type="radio" name="mode" value="mixed"><span>Mixed chain</span></label>
+        </div></div>
+      <div class="field" id="opField"><div class="cap">Operation</div>
+        <select id="op">
+          <option value="add">Addition (+)</option><option value="sub">Subtraction (−)</option>
+          <option value="mul">Multiplication (×)</option><option value="div">Division (÷)</option>
+          <option value="square">Squares (x²)</option><option value="sqrt">Square roots (√)</option>
+        </select></div>
+      <div class="field" id="subField" hidden><div class="cap">Chain style</div>
+        <div class="seg">
+          <label><input type="radio" name="sub" value="guided" checked><span>Guided</span></label>
+          <label><input type="radio" name="sub" value="memory"><span>Memory</span></label>
+        </div>
+        <p class="hint" id="subHint" style="margin:6px 0 0"></p></div>
+      <div class="field"><div class="cap">Answer with</div>
+        <div class="seg">
+          <label><input type="radio" name="input" value="keyboard" checked><span>Keyboard</span></label>
+          <label><input type="radio" name="input" value="voice"><span>Voice</span></label>
+        </div>
+        <p class="hint" id="voiceHint" style="margin:6px 0 0" hidden></p></div>
+      <button id="start" class="primary">Start</button>
+      <p class="err" id="setupErr"></p>
+    </div>
+
+    <!-- GAME -->
+    <div id="game" hidden>
+      <div class="bar">
+        <span id="stats" class="muted"></span>
+        <div class="clock"><span id="timer">0.00 s</span><small id="last">&nbsp;</small></div>
+      </div>
+      <div class="prev" id="prev"></div>
+      <div class="stage">
+        <div class="hud"><b id="hudName"></b><span id="hudLv"></span><div class="hp"><i id="hudBar"></i></div></div>
+        <div class="foe">❓</div><div class="pad"></div><div class="mon" id="mon"></div>
+      </div>
+      <div class="qcard" id="q"></div>
+      <div class="fb" id="fb">&nbsp;</div>
+      <form id="form"><input id="answer" inputmode="numeric" autocomplete="off" placeholder="Your answer">
+        <small>Press Enter to submit</small></form>
+      <div id="voice" hidden><b id="vstatus"></b><div id="heard" class="muted"></div></div>
+      <div class="actions"><button id="restart" class="ghost"></button><button id="end" class="ghost">End session</button></div>
+    </div>
+  </section>
+
+  <aside class="card">
+    <h2>Hall of Champions</h2>
+    <p class="muted" style="margin:0">Longest streak of correct answers</p>
+    <div class="tabs" id="tabs">
+      <button data-b="all" class="on">All</button><button data-b="separate">Separate</button><button data-b="mixed">Mixed</button>
+    </div>
+    <ol id="rows"></ol>
+    <p id="me" class="muted" style="margin:14px 0 0"></p>
+  </aside>
+</main>
+
+<dialog id="auth">
+  <form id="authForm">
+    <div class="seg" id="authTabs" style="margin-bottom:16px">
+      <label><input type="radio" name="am" value="login" checked><span>Sign in</span></label>
+      <label><input type="radio" name="am" value="register"><span>Create account</span></label>
+    </div>
+    <input type="text" id="u" placeholder="Username" autocomplete="username" style="margin-bottom:10px">
+    <input type="password" id="p" placeholder="Password (8+ characters)" autocomplete="current-password">
+    <p class="hint" id="authHint" hidden style="margin:8px 0 0">Your guest progress carries over to the new account.</p>
+    <p class="err" id="authErr"></p>
+    <button class="primary" id="authGo" style="margin-top:0">Sign in</button>
+    <button type="button" class="ghost" id="authCancel" style="width:100%;margin-top:8px">Cancel</button>
+  </form>
+</dialog>
+
+<script>
+const $ = s => document.querySelector(s);
+const val = n => document.querySelector(`input[name=${n}]:checked`).value;
+let user = null, game = null, t0 = 0, busy = false, rec = null, voiceOn = false, board = "all";
+let curStage = 0, partner = "flame";
+
+async function api(path, body) {
+  const r = await fetch(path, {
+    method: body ? "POST" : "GET",
+    credentials: "include",
+    headers: body ? { "Content-Type": "application/json" } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(typeof d.detail === "string" ? d.detail : "Something went wrong");
+  return d;
+}
+
+/* ---------- theme ---------- */
+function setTheme(t) {
+  document.documentElement.dataset.theme = t;
+  localStorage.setItem("theme", t);
+  $("#theme").textContent = t === "dark" ? "☀" : "☾";
+}
+$("#theme").onclick = () => setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+setTheme(document.documentElement.dataset.theme);
+
+/* ---------- partner (cosmetic: sets accent colour and mascot) ---------- */
+// Correct answers in a row needed to reach the next level. The LAST level is called MAXXED.
+const STREAK_PER_LEVEL = 5;
+const PARTNERS = {
+  flame: { name: "Emberlet", stages: ["🥚", "🦎", "🐊", "🐲", "🐉", "🌋", "🔥"] },
+  leaf:  { name: "Sproutle", stages: ["🌱", "🌿", "🍀", "🐢", "🦕", "🌴", "🌳"] },
+  aqua:  { name: "Bubblin",  stages: ["💧", "🐟", "🐠", "🐡", "🐬", "🦈", "🐋"] },
+  spark: { name: "Voltling", stages: ["🥚", "🐣", "🐥", "🐤", "🦅", "⚡", "🌩️"] },
+};
+function setPartner(key) {
+  partner = key; document.documentElement.dataset.partner = key; localStorage.setItem("partner", key);
+}
+function drawPartner(streak, react) {
+  const p = PARTNERS[partner], last = p.stages.length - 1, mon = $("#mon");
+  const stage = Math.min(last, Math.floor(streak / STREAK_PER_LEVEL));
+  curStage = stage;
+  const st = p.stages[stage];
+  mon.textContent = "";
+  if (typeof st === "string") {                       // emoji partner
+    mon.textContent = st; mon.style.fontSize = (52 + stage * 7) + "px";
+  } else {                                            // image partner: grows with each level
+    const img = new Image(); img.alt = p.name; img.src = st.img;
+    img.style.height = (66 + stage * 10) + "px";
+    img.onerror = () => { mon.textContent = st.fallback; mon.style.fontSize = (52 + stage * 7) + "px"; };
+    mon.append(img);
+  }
+  $("#hudName").textContent = p.name;
+  $("#hudLv").textContent = stage === last ? "👑 MAXXED" : "⭐ Lv." + (stage + 1);
+  $("#hudBar").style.width = stage === last ? "100%" : (streak % STREAK_PER_LEVEL) * (100 / STREAK_PER_LEVEL) + "%";
+  if (react) { mon.classList.remove("hit", "miss"); void mon.offsetWidth; mon.classList.add(react); }
+}
+
+/* ---------- account (guest by default) ---------- */
+async function loadUser() {
+  user = await api("/api/me");
+  $("#who").textContent = user.guest ? "Playing as guest" : "@" + user.username;
+  $("#authBtn").textContent = user.guest ? "Sign in / Create account" : "Log out";
+  loadBoard();
+}
+$("#authBtn").onclick = async () => {
+  if (user.guest) { $("#authErr").textContent = ""; $("#auth").showModal(); }
+  else { await api("/api/logout", {}); endGame(); await loadUser(); }
+};
+$("#authCancel").onclick = () => $("#auth").close();
+$("#authTabs").onchange = () => {
+  const reg = document.querySelector("input[name=am]:checked").value === "register";
+  $("#authGo").textContent = reg ? "Create account" : "Sign in";
+  $("#authHint").hidden = !reg;
+};
+$("#authForm").onsubmit = async e => {
+  e.preventDefault();
+  const mode = document.querySelector("input[name=am]:checked").value;
+  try {
+    await api("/api/" + mode, { username: $("#u").value.trim(), password: $("#p").value });
+    $("#auth").close(); $("#p").value = ""; await loadUser();
+  } catch (err) { $("#authErr").textContent = err.message; }
+};
+
+/* ---------- setup screen ---------- */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+function syncSetup() {
+  setPartner(val("partner"));
+  const p = PARTNERS[partner];
+  const thresholds = [0, 5, 10, 15, 20, 25, 30];
+  const stageLabels = ["Lv.1", "Lv.2", "Lv.3", "Lv.4", "Lv.5", "Lv.6", "MAXXED"];
+  const stagesEl = $("#partnerStages");
+  if (stagesEl) {
+    stagesEl.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);padding:8px 6px;border-radius:8px;border:1px solid var(--line);margin-top:10px;font-size:11px;gap:2px">
+        ${p.stages.map((st, i) => `
+          <div style="text-align:center;flex:1">
+            <div style="font-size:20px">${typeof st === "string" ? st : st.fallback}</div>
+            <div style="font-size:9px;color:var(--muted);margin-top:2px">${stageLabels[i]}</div>
+            <div style="font-size:8px;color:var(--accent);font-weight:700">${thresholds[i]}+</div>
+          </div>
+        `).join("")}
+      </div>
+    `;
+  }
+  const mixed = val("mode") === "mixed";
+  $("#opField").hidden = mixed; $("#subField").hidden = !mixed;
+  $("#subHint").textContent = val("sub") === "guided"
+    ? "Shows the previous answer above each step."
+    : "Nothing shown. You carry the number yourself, and a wrong answer isn't corrected.";
+  $("#voiceHint").hidden = !(val("input") === "voice" && !SR);
+  $("#voiceHint").textContent = "Voice needs Chrome, Edge or Safari. Keyboard will be used instead.";
+}
+document.querySelectorAll("#setup input[type=radio]").forEach(i => i.onchange = syncSetup);
+const savedPartner = localStorage.getItem("partner");
+if (PARTNERS[savedPartner]) document.querySelector(`input[name=partner][value=${savedPartner}]`).checked = true;
+syncSetup();
+
+$("#start").onclick = async () => {
+  try {
+    const mode = val("mode");
+    const d = await api("/api/game/start", { mode, op: $("#op").value, guided: val("sub") === "guided" });
+    game = { id: d.game_id, mode, guided: val("sub") === "guided" };
+    $("#setup").hidden = true; $("#game").hidden = false;
+    $("#restart").textContent = mode === "mixed" ? "New chain" : "New series";
+    $("#last").innerHTML = "&nbsp;"; $("#fb").innerHTML = "&nbsp;";
+    const useVoice = val("input") === "voice" && SR;
+    $("#form").hidden = useVoice; $("#voice").hidden = !useVoice;
+    showQuestion(d);
+    if (useVoice) startVoice();
+  } catch (err) { $("#setupErr").textContent = err.message; }
+};
+
+/* ---------- game ---------- */
+function showQuestion(d, react) {
+  $("#q").textContent = d.question;
+  $("#stats").textContent = `🎯 ${d.stats.correct}/${d.stats.total} correct · 🔥 streak ${d.stats.streak} · 🏆 best ${d.stats.best}`;
+  let prev = "";
+  if (game.mode === "mixed") prev = !game.guided ? "Memory mode: carry the number yourself"
+                                  : d.prev == null ? "New chain" : `Previous answer: ${d.prev}`;
+  else if (d.new_series && d.stats.total) prev = "New series";
+  $("#prev").textContent = prev;
+  $("#answer").value = ""; $("#answer").focus();
+  drawPartner(d.stats.streak, react);
+  t0 = performance.now();                       // the clock restarts from 0 for each question
+}
+
+(function tick() {                              // live clock, redrawn every frame
+  if (game) $("#timer").textContent = ((performance.now() - t0) / 1000).toFixed(2) + " s";
+  requestAnimationFrame(tick);
+})();
+
+async function submit(payload) {
+  if (busy || !game) return;
+  busy = true;
+  try {
+    const d = await api("/api/game/answer", { game_id: game.id, ...payload });
+    if (d.ignored) return;
+    $("#last").textContent = `⚡ last answer ${d.elapsed.toFixed(2)} s`;   // timed by the server
+    $("#fb").style.color = d.ok ? "var(--good)" : "var(--bad)";
+    $("#fb").textContent = d.ok ? (d.stats.streak >= 3 ? "💥 Correct — critical hit!" : "✨ Correct!")
+      : d.correct != null ? `❌ Strike! You said ${d.your}, answer was ${d.correct}` : "❌ Strike!";
+    const before = curStage;
+    showQuestion(d, d.ok ? "hit" : "miss");
+    if (d.ok && curStage > before) {
+      $("#fb").style.color = "var(--accent)";
+      $("#fb").textContent = (curStage === PARTNERS[partner].stages.length - 1 ? `🎉 ${PARTNERS[partner].name} is MAXXED!` : `🌟 ${PARTNERS[partner].name} evolved to Lv.${curStage + 1}!`);
+    }
+    if (d.stats.streak && d.stats.streak === d.stats.best) loadBoard();
+  } catch (err) { $("#fb").style.color = "var(--bad)"; $("#fb").textContent = err.message; }
+  finally { busy = false; }
+}
+
+$("#form").onsubmit = e => {
+  e.preventDefault();
+  const raw = $("#answer").value.trim();
+  if (/^-?\d+$/.test(raw)) submit({ answer: parseInt(raw, 10) });
+  else { $("#fb").style.color = "var(--muted)"; $("#fb").textContent = "Enter a whole number"; }
+};
+$("#restart").onclick = async () => {
+  const d = await api("/api/game/restart", { game_id: game.id });
+  $("#fb").innerHTML = "&nbsp;"; showQuestion(d);
+};
+$("#end").onclick = () => { endGame(); loadBoard(); };
+function endGame() { stopVoice(); game = null; $("#game").hidden = true; $("#setup").hidden = false; }
+
+/* ---------- voice: the browser keeps the mic open and transcribes continuously ---------- */
+function startVoice() {
+  rec = new SR();
+  rec.continuous = true;          // don't stop after one phrase
+  rec.interimResults = false;     // only react to finished phrases
+  rec.lang = "en-US";
+  rec.onresult = e => {
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (!e.results[i].isFinal) continue;
+      const text = e.results[i][0].transcript.trim();
+      $("#heard").textContent = `Heard: “${text}”`;
+      submit({ text });           // the server turns words into a number and grades it
+    }
+  };
+  rec.onerror = e => {
+    if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+      voiceOn = false; $("#vstatus").textContent = "Microphone blocked";
+      $("#heard").textContent = "Allow microphone access in the address bar, or use keyboard mode.";
+    }
+  };
+  rec.onend = () => { if (voiceOn && game) try { rec.start(); } catch {} };  // browsers end sessions periodically: reopen = always listening
+  voiceOn = true; rec.start(); $("#vstatus").textContent = "● Listening";
+}
+function stopVoice() { voiceOn = false; try { rec && rec.stop(); } catch {} }
+
+/* ---------- leaderboard ---------- */
+async function loadBoard() {
+  try {
+    const d = await api("/api/leaderboard?mode=" + board);
+    const rows = $("#rows"); rows.innerHTML = "";
+    d.rows.forEach(r => {
+      const li = document.createElement("li");
+      if (user && r.username === user.username) li.className = "you";
+      for (const [cls, text] of [["rank", r.rank], ["name", r.username], ["score", r.best]]) {
+        const s = document.createElement("span"); s.className = cls; s.textContent = text; li.append(s);
+      }
+      rows.append(li);
+    });
+    $("#me").textContent = d.me.guest
+      ? `Your best streak: ${d.me.best}. Create an account to appear on the leaderboard.`
+      : d.me.rank ? `You are #${d.me.rank} with a best streak of ${d.me.best}.` : "Play a game to get on the board.";
+    if (!d.rows.length) $("#rows").innerHTML = '<li class="muted">No scores yet. Be the first.</li>';
+  } catch {}
+}
+$("#tabs").onclick = e => {
+  if (!e.target.dataset.b) return;
+  board = e.target.dataset.b;
+  document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b === e.target));
+  loadBoard();
+};
+setInterval(() => { if (!document.hidden) loadBoard(); }, 10000);   // near-real-time refresh
+
+loadUser();
+</script>
+</body>
+</html>
