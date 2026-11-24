@@ -297,4 +297,16 @@ def leaderboard(request: Request, response: Response, mode: str = "all"):
             "me": {"best": mine, "rank": rank, "guest": bool(u["is_guest"])}}
 
 
-app.mount("/", StaticFiles(directory=BASE / "static", html=True), name="static")
+if (BASE / "static").is_dir():
+    app.mount("/", StaticFiles(directory=BASE / "static", html=True), name="static")
+elif (BASE / "index.html").is_file():
+    from fastapi.responses import FileResponse
+    @app.get("/")
+    def serve_index():
+        return FileResponse(BASE / "index.html")
+else:
+    @app.get("/")
+    def health():
+        return {"status": "ok", "message": "Mental Math API is running"}
+
+  
