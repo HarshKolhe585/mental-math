@@ -2,11 +2,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://mental-math-backend.onrender.com"
-    },
-    {
-      "source": "/(.*)",
-      "destination": "/static/$1"
+      "destination": "https://mental-math-backend-xxxx.onrender.com/api/:path*"
     }
   ]
 }
