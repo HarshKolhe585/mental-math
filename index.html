@@ -6,6 +6,7 @@
 <title>Mental Math Quest</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
   // Apply the saved (or system) theme before first paint, so there's no flash.
   document.documentElement.dataset.theme = localStorage.getItem("theme") ||
@@ -171,6 +172,15 @@
 
 <dialog id="auth">
   <form id="authForm">
+    <p id="authMsg" class="muted" hidden style="margin:0 0 14px"></p>
+    <div id="googleAuthWrap" style="text-align:center;margin-bottom:12px">
+      <div id="googleBtn" style="display:flex;justify-content:center;min-height:40px"></div>
+    </div>
+    <div id="authDivider" style="display:flex;align-items:center;margin:12px 0 14px;color:var(--muted);font-size:11px">
+      <div style="flex:1;height:1px;background:var(--line)"></div>
+      <span style="padding:0 8px">or with password</span>
+      <div style="flex:1;height:1px;background:var(--line)"></div>
+    </div>
     <div class="seg" id="authTabs" style="margin-bottom:16px">
       <label><input type="radio" name="am" value="login" checked><span>Sign in</span></label>
       <label><input type="radio" name="am" value="register"><span>Create account</span></label>
@@ -189,6 +199,7 @@ const $ = s => document.querySelector(s);
 const val = n => document.querySelector(`input[name=${n}]:checked`).value;
 let user = null, game = null, t0 = 0, busy = false, rec = null, voiceOn = false, board = "all";
 let curStage = 0, partner = "flame";
+let wallMode = false, pendingPayload = null;
 
 async function api(path, body) {
   const r = await fetch(path, {
@@ -246,15 +257,76 @@ function drawPartner(streak, react) {
 /* ---------- account (guest by default) ---------- */
 async function loadUser() {
   user = await api("/api/me");
-  $("#who").textContent = user.guest ? "Playing as guest" : "@" + user.username;
+  if (user.guest) {
+    const n = Math.max(0, user.free_trials - user.trials_used);
+    $("#who").textContent = `Guest · ${n} free session(s) left`;
+  } else {
+    $("#who").textContent = "@" + user.username;
+  }
   $("#authBtn").textContent = user.guest ? "Sign in / Create account" : "Log out";
+  setupGoogleAuth(user.google_client_id);
   loadBoard();
 }
+
+function setupGoogleAuth(clientId) {
+  const btn = $("#googleBtn");
+  if (!btn) return;
+  if (!clientId) {
+    btn.innerHTML = `
+      <button type="button" class="ghost" style="width:100%;display:flex;align-items:center;justify-content:center;gap:10px;padding:10px;border:1px solid var(--line);border-radius:10px;font-weight:600">
+        <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.616z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/><path fill="#FBBC05" d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707s.102-1.167.282-1.707V4.961H.957C.347 6.173 0 7.548 0 9s.347 2.827.957 4.039l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.961L3.964 7.293C4.672 5.166 6.656 3.58 9 3.58z"/></svg>
+        <span>Continue with Google</span>
+      </button>
+    `;
+    btn.querySelector("button").onclick = () => {
+      $("#authErr").textContent = "Google Sign-In ready: set GOOGLE_CLIENT_ID environment variable to activate.";
+    };
+    return;
+  }
+  let tries = 0;
+  function render() {
+    if (window.google && window.google.accounts) {
+      google.accounts.id.initialize({
+        client_id: clientId,
+        callback: handleGoogleCredential,
+        auto_select: false,
+      });
+      btn.innerHTML = "";
+      google.accounts.id.renderButton(btn, {
+        theme: document.documentElement.dataset.theme === "dark" ? "filled_black" : "outline",
+        size: "large",
+        width: 320,
+        text: "continue_with",
+        shape: "rectangular"
+      });
+    } else if (++tries < 30) {
+      setTimeout(render, 150);
+    }
+  }
+  render();
+}
+
+async function handleGoogleCredential(response) {
+  try {
+    $("#authErr").textContent = "";
+    await api("/api/auth/google", { credential: response.credential });
+    const wasWall = wallMode;
+    wallMode = false;
+    $("#auth").close();
+    $("#p").value = "";
+    await loadUser();
+    if (wasWall) resumeAfterAuth();
+  } catch (err) {
+    $("#authErr").textContent = err.message;
+  }
+}
 $("#authBtn").onclick = async () => {
-  if (user.guest) { $("#authErr").textContent = ""; $("#auth").showModal(); }
+  if (user.guest) { $("#authErr").textContent = ""; $("#authMsg").hidden = true; $("#authCancel").hidden = false; $("#auth").showModal(); }
   else { await api("/api/logout", {}); endGame(); await loadUser(); }
 };
-$("#authCancel").onclick = () => $("#auth").close();
+$("#authCancel").onclick = () => { if (!wallMode) $("#auth").close(); };
+$("#auth").addEventListener("cancel", e => { if (wallMode) e.preventDefault(); });
+$("#auth").addEventListener("close", () => { if (wallMode) $("#auth").showModal(); });
 $("#authTabs").onchange = () => {
   const reg = document.querySelector("input[name=am]:checked").value === "register";
   $("#authGo").textContent = reg ? "Create account" : "Sign in";
@@ -265,9 +337,37 @@ $("#authForm").onsubmit = async e => {
   const mode = document.querySelector("input[name=am]:checked").value;
   try {
     await api("/api/" + mode, { username: $("#u").value.trim(), password: $("#p").value });
+    const wasWall = wallMode;
+    wallMode = false;
     $("#auth").close(); $("#p").value = ""; await loadUser();
+    if (wasWall) resumeAfterAuth();
   } catch (err) { $("#authErr").textContent = err.message; }
 };
+
+function openWall() {
+  wallMode = true;
+  $("#authMsg").textContent = "You\u2019ve used your " + (user && user.free_trials != null ? user.free_trials : 2) +
+    " free sessions. Create a free account to keep playing. Your progress is saved and your game continues right where it stopped.";
+  $("#authMsg").hidden = false;
+  $("#authCancel").hidden = true;
+  $("#authErr").textContent = "";
+  const regRadio = document.querySelector("input[name=am][value=register]");
+  regRadio.checked = true;
+  $("#authTabs").onchange();
+  if (!$("#auth").open) $("#auth").showModal();
+}
+
+function resumeAfterAuth() {
+  $("#authMsg").hidden = true;
+  $("#authCancel").hidden = false;
+  if (pendingPayload) {
+    const payload = pendingPayload;
+    pendingPayload = null;
+    submit(payload);
+  } else if (!game) {
+    $("#start").click();
+  }
+}
 
 /* ---------- setup screen ---------- */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -315,7 +415,11 @@ $("#start").onclick = async () => {
     $("#form").hidden = useVoice; $("#voice").hidden = !useVoice;
     showQuestion(d);
     if (useVoice) startVoice();
-  } catch (err) { $("#setupErr").textContent = err.message; }
+    await loadUser();
+  } catch (err) {
+    if (err.message === "signup_required") openWall();
+    else $("#setupErr").textContent = err.message;
+  }
 };
 
 /* ---------- game ---------- */
@@ -338,7 +442,7 @@ function showQuestion(d, react) {
 })();
 
 async function submit(payload) {
-  if (busy || !game) return;
+  if (busy || !game || wallMode) return;
   busy = true;
   try {
     const d = await api("/api/game/answer", { game_id: game.id, ...payload });
@@ -354,7 +458,10 @@ async function submit(payload) {
       $("#fb").textContent = (curStage === PARTNERS[partner].stages.length - 1 ? `🎉 ${PARTNERS[partner].name} is MAXXED!` : `🌟 ${PARTNERS[partner].name} evolved to Lv.${curStage + 1}!`);
     }
     if (d.stats.streak && d.stats.streak === d.stats.best) loadBoard();
-  } catch (err) { $("#fb").style.color = "var(--bad)"; $("#fb").textContent = err.message; }
+  } catch (err) {
+    if (err.message === "signup_required") { pendingPayload = payload; openWall(); }
+    else { $("#fb").style.color = "var(--bad)"; $("#fb").textContent = err.message; }
+  }
   finally { busy = false; }
 }
 
@@ -368,7 +475,7 @@ $("#restart").onclick = async () => {
   const d = await api("/api/game/restart", { game_id: game.id });
   $("#fb").innerHTML = "&nbsp;"; showQuestion(d);
 };
-$("#end").onclick = () => { endGame(); loadBoard(); };
+$("#end").onclick = () => { endGame(); loadUser(); };
 function endGame() { stopVoice(); game = null; $("#game").hidden = true; $("#setup").hidden = false; }
 
 /* ---------- voice: the browser keeps the mic open and transcribes continuously ---------- */
