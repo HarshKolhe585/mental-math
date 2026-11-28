@@ -28,3 +28,16 @@ NOTES
   - Use Chrome or Edge for voice mode; allow the microphone when asked.
   - To reset all accounts and scores, stop the server and delete mathgame.db.
   - Keep this folder somewhere permanent (not Downloads).
+
+GUEST LIMIT
+  Guests can play a limited number of sessions before they must create an account.
+  After signing up (or signing in) their game continues exactly where it stopped.
+  Environment variables (set before starting the server):
+    GUEST_FREE_TRIALS    How many full sessions a guest can play (default: 2).
+    GUEST_GRACE_ANSWERS  Extra answers allowed in the next session before the
+                         sign-up wall appears (default: 5; set to 0 to block
+                         immediately when free trials are exhausted).
+    COOKIE_SECURE        Set to 1 when serving over HTTPS (Render, etc.)
+                         so session cookies use Secure + SameSite=None.
+    GOOGLE_CLIENT_ID     Google Cloud OAuth 2.0 Web Client ID for verified
+                         Google Sign-In (from console.cloud.google.com).
