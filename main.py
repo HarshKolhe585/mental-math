@@ -15,11 +15,13 @@ Design notes
 """
 import hashlib
 import hmac
+import json
 import os
 import re
 import secrets
 import sqlite3
 import time
+import urllib.request
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
@@ -34,6 +36,9 @@ from engine import OPERATIONS, GameSession, Question, parse_spoken_number
 BASE = Path(__file__).parent
 DB_PATH = os.environ.get("DB_PATH", str(BASE / "mathgame.db"))
 SECURE_COOKIE = os.environ.get("COOKIE_SECURE") == "1"  # set to 1 when served over HTTPS
+FREE_TRIALS   = int(os.environ.get("GUEST_FREE_TRIALS", 2))
+GRACE_ANSWERS = int(os.environ.get("GUEST_GRACE_ANSWERS", 5))
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 VALID_OPS = set(OPERATIONS.values())
 
 # ----------------------------------------------------------------------------
@@ -67,8 +72,17 @@ def db():
         conn.close()
 
 
+def ensure_columns(conn):
+    cols = [r["name"] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
+    if "email" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
+    if "google_id" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN google_id TEXT")
+
+
 with db() as _c:
     _c.executescript(SCHEMA)
+    ensure_columns(_c)
 
 # ----------------------------------------------------------------------------
 # Passwords and sessions
@@ -109,7 +123,27 @@ def get_user(conn, request, response):
 
 def public(u):
     return {"username": u["username"], "guest": bool(u["is_guest"]),
-            "best": max(u["best_separate"], u["best_mixed"])}
+            "best": max(u["best_separate"], u["best_mixed"]),
+            "email": u["email"] if "email" in u.keys() else None}
+
+
+def signup_wall(conn, user, game_id=None):
+    """Return True if this guest has exhausted free trials + grace answers."""
+    if not user["is_guest"]:
+        return False
+    rows = conn.execute("SELECT id, total FROM games WHERE user_id=? ORDER BY rowid",
+                        (user["id"],)).fetchall()
+    grace_total = sum(r["total"] for r in rows[FREE_TRIALS:])
+    walled = grace_total >= GRACE_ANSWERS
+    if game_id is None:  # starting a new session
+        return len(rows) >= FREE_TRIALS and walled
+    # answering inside a session
+    idx = 0
+    for i, r in enumerate(rows):
+        if r["id"] == game_id:
+            idx = i
+            break
+    return idx >= FREE_TRIALS and walled
 
 
 app = FastAPI(title="Mental Math")
@@ -138,7 +172,14 @@ def validate(c):
 @app.get("/api/me")
 def me(request: Request, response: Response):
     with db() as c:
-        return public(get_user(c, request, response))
+        u = get_user(c, request, response)
+        trials_used = c.execute("SELECT COUNT(*) AS n FROM games WHERE user_id=?",
+                                (u["id"],)).fetchone()["n"]
+        d = public(u)
+        d["free_trials"] = FREE_TRIALS
+        d["trials_used"] = trials_used
+        d["google_client_id"] = GOOGLE_CLIENT_ID
+        return d
 
 
 @app.post("/api/register")
@@ -157,11 +198,20 @@ def register(creds: Creds, request: Request, response: Response):
 
 
 @app.post("/api/login")
-def login(creds: Creds, response: Response):
+def login(creds: Creds, request: Request, response: Response):
     with db() as c:
         u = c.execute("SELECT * FROM users WHERE username=?", (creds.username,)).fetchone()
         if not u or not check_pw(creds.password, u["pw_hash"]):
             raise HTTPException(401, "Wrong username or password")
+        # If the current session belongs to a different guest, merge its games
+        guest = get_user(c, request, response)
+        if guest["is_guest"] and guest["id"] != u["id"]:
+            c.execute("UPDATE games SET user_id=? WHERE user_id=?", (u["id"], guest["id"]))
+            c.execute("UPDATE users SET best_separate=MAX(best_separate,?), "
+                      "best_mixed=MAX(best_mixed,?), "
+                      "total_correct=total_correct+? WHERE id=?",
+                      (guest["best_separate"], guest["best_mixed"],
+                       guest["total_correct"], u["id"]))
         new_session(c, response, u["id"])
         return public(u)
 
@@ -172,6 +222,75 @@ def logout(request: Request, response: Response):
         c.execute("DELETE FROM sessions WHERE token=?", (request.cookies.get("sid"),))
     response.delete_cookie("sid")
     return {"ok": True}
+
+
+class GoogleAuthReq(BaseModel):
+    credential: str
+
+
+@app.post("/api/auth/google")
+def auth_google(req: GoogleAuthReq, request: Request, response: Response):
+    if not req.credential:
+        raise HTTPException(400, "Missing Google credential token")
+
+    # Verify ID token using Google TokenInfo API
+    token_url = f"https://oauth2.googleapis.com/tokeninfo?id_token={req.credential}"
+    try:
+        ur = urllib.request.Request(token_url, headers={"User-Agent": "MentalMath"})
+        with urllib.request.urlopen(ur, timeout=10) as r:
+            token_data = json.loads(r.read().decode("utf-8"))
+    except Exception:
+        raise HTTPException(401, "Google token verification failed")
+
+    if GOOGLE_CLIENT_ID and token_data.get("aud") != GOOGLE_CLIENT_ID:
+        raise HTTPException(401, "Google Client ID mismatch")
+
+    if token_data.get("iss") not in ("accounts.google.com", "https://accounts.google.com"):
+        raise HTTPException(401, "Invalid token issuer")
+
+    if str(token_data.get("email_verified", "")).lower() != "true":
+        raise HTTPException(400, "Google email not verified")
+
+    google_id = token_data["sub"]
+    email = token_data.get("email", "").lower()
+    raw_name = token_data.get("name", "").strip() or email.split("@")[0]
+
+    with db() as c:
+        current_guest = get_user(c, request, response)
+
+        # Check if an existing registered user has this google_id or verified email
+        existing = c.execute("SELECT * FROM users WHERE google_id=? OR (email=? AND email IS NOT NULL AND is_guest=0)",
+                             (google_id, email)).fetchone()
+
+        if existing:
+            # Merge current guest progress into existing account if different
+            if current_guest["is_guest"] and current_guest["id"] != existing["id"]:
+                c.execute("UPDATE games SET user_id=? WHERE user_id=?", (existing["id"], current_guest["id"]))
+                c.execute("UPDATE users SET best_separate=MAX(best_separate,?), "
+                          "best_mixed=MAX(best_mixed,?), "
+                          "total_correct=total_correct+? WHERE id=?",
+                          (current_guest["best_separate"], current_guest["best_mixed"],
+                           current_guest["total_correct"], existing["id"]))
+            new_session(c, response, existing["id"])
+            return public(existing)
+
+        # New user: upgrade guest row in place so existing streak/games are kept
+        clean_name = re.sub(r"[^A-Za-z0-9_]", "_", raw_name)[:20]
+        if len(clean_name) < 3:
+            clean_name = "user_" + secrets.token_hex(3)
+        username = clean_name
+
+        # Ensure unique username
+        dup = c.execute("SELECT id FROM users WHERE username=? AND id!=?",
+                        (username, current_guest["id"])).fetchone()
+        if dup:
+            suffix = "_" + secrets.token_hex(2)
+            username = username[:20 - len(suffix)] + suffix
+
+        c.execute("UPDATE users SET username=?, is_guest=0, email=?, google_id=? WHERE id=?",
+                  (username, email, google_id, current_guest["id"]))
+        updated = c.execute("SELECT * FROM users WHERE id=?", (current_guest["id"],)).fetchone()
+        return public(updated)
 
 
 # ----------------------------------------------------------------------------
@@ -227,6 +346,8 @@ def start(req: StartReq, request: Request, response: Response):
     gid = secrets.token_urlsafe(12)
     with db() as c:
         u = get_user(c, request, response)
+        if signup_wall(c, u):
+            raise HTTPException(403, "signup_required")
         c.execute("INSERT INTO games(id,user_id,mode,op,guided,q_text,q_answer,correct,total,"
                   "streak,best,asked_at) VALUES (?,?,?,?,?,?,?,0,0,0,0,?)",
                   (gid, u["id"], req.mode, req.op, int(req.guided), q.text, q.answer, time.time()))
@@ -241,6 +362,8 @@ def answer(req: AnswerReq, request: Request, response: Response):
         return {"ignored": True}
     with db() as c:
         u = get_user(c, request, response)
+        if signup_wall(c, u, req.game_id):
+            raise HTTPException(403, "signup_required")
         g, s = load(c, req.game_id, u)
         elapsed = time.time() - g["asked_at"]  # measured on the server
         true_answer = g["q_answer"]
@@ -308,5 +431,3 @@ else:
     @app.get("/")
     def health():
         return {"status": "ok", "message": "Mental Math API is running"}
-
-  
