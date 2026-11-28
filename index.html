@@ -258,7 +258,9 @@ function drawPartner(streak, react) {
 async function loadUser() {
   user = await api("/api/me");
   if (user.guest) {
-    const n = Math.max(0, user.free_trials - user.trials_used);
+    const freeTrials = user.free_trials != null ? user.free_trials : 2;
+    const trialsUsed = user.trials_used != null ? user.trials_used : 0;
+    const n = Math.max(0, freeTrials - trialsUsed);
     $("#who").textContent = `Guest · ${n} free session(s) left`;
   } else {
     $("#who").textContent = "@" + user.username;
